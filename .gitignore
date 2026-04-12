@@ -3,3 +3,5 @@ node_modules/
 *.log
 tests/results/*.json
 .DS_Store
+
+*.pdf
