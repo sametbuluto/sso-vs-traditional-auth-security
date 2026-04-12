@@ -1,0 +1,182 @@
+version: '3.8'
+
+# ============================================================
+# SSO vs Traditional Auth — Unified Docker Compose
+# 
+# Usage:
+#   Insecure mode: SECURE_MODE=false docker-compose up --build
+#   Secure mode:   SECURE_MODE=true  docker-compose up --build
+# ============================================================
+
+services:
+
+  # ========================================================
+  # SSO SYSTEM (Ports 4000-4005)
+  # ========================================================
+
+  # Identity Provider — The heart of SSO
+  sso-identity-provider:
+    build: ./sso/identity-provider
+    container_name: sso-idp
+    ports:
+      - "4000:4000"
+    environment:
+      - SECURE_MODE=${SECURE_MODE:-false}
+    volumes:
+      - ./sso/keys:/app/keys:ro
+    networks:
+      - sso-net
+
+  # JWT Service — Token signing/verification helper
+  sso-jwt-service:
+    build: ./sso/jwt-service
+    container_name: sso-jwt
+    ports:
+      - "4001:4001"
+    environment:
+      - SECURE_MODE=${SECURE_MODE:-false}
+    volumes:
+      - ./sso/keys:/app/keys:ro
+    networks:
+      - sso-net
+
+  # SSO Service A
+  sso-service-a:
+    build: ./sso/service-a
+    container_name: sso-service-a
+    ports:
+      - "4002:4002"
+    environment:
+      - SERVICE_NAME=service-a
+      - PORT=4002
+      - CLIENT_ID=service-a
+      - SECURE_MODE=${SECURE_MODE:-false}
+    volumes:
+      - ./sso/rbac-middleware:/app/rbac-middleware:ro
+      - ./sso/keys:/app/keys:ro
+    depends_on:
+      - sso-identity-provider
+    networks:
+      - sso-net
+
+  # SSO Service B
+  sso-service-b:
+    build: ./sso/service-b
+    container_name: sso-service-b
+    ports:
+      - "4003:4003"
+    environment:
+      - SERVICE_NAME=service-b
+      - PORT=4003
+      - CLIENT_ID=service-b
+      - SECURE_MODE=${SECURE_MODE:-false}
+    volumes:
+      - ./sso/rbac-middleware:/app/rbac-middleware:ro
+      - ./sso/keys:/app/keys:ro
+    depends_on:
+      - sso-identity-provider
+    networks:
+      - sso-net
+
+  # SSO Admin Panel
+  sso-admin-panel:
+    build: ./sso/admin-panel
+    container_name: sso-admin
+    ports:
+      - "4004:4004"
+    environment:
+      - SERVICE_NAME=admin-panel
+      - PORT=4004
+      - CLIENT_ID=admin-panel
+      - SECURE_MODE=${SECURE_MODE:-false}
+    volumes:
+      - ./sso/rbac-middleware:/app/rbac-middleware:ro
+      - ./sso/keys:/app/keys:ro
+    depends_on:
+      - sso-identity-provider
+    networks:
+      - sso-net
+
+  # SSO API Service
+  sso-api-service:
+    build: ./sso/api-service
+    container_name: sso-api
+    ports:
+      - "4005:4005"
+    environment:
+      - SERVICE_NAME=api-service
+      - PORT=4005
+      - CLIENT_ID=api-service
+      - SECURE_MODE=${SECURE_MODE:-false}
+    volumes:
+      - ./sso/rbac-middleware:/app/rbac-middleware:ro
+      - ./sso/keys:/app/keys:ro
+    depends_on:
+      - sso-identity-provider
+    networks:
+      - sso-net
+
+  # ========================================================
+  # TRADITIONAL SYSTEM (Ports 3001-3004)
+  # ========================================================
+
+  # Traditional Service A
+  trad-service-a:
+    build: ./traditional/service-a
+    container_name: trad-service-a
+    ports:
+      - "3001:3001"
+    environment:
+      - SERVICE_NAME=service-a
+      - PORT=3001
+      - SESSION_SECRET=insecure-secret-a
+    networks:
+      - traditional-net
+
+  # Traditional Service B
+  trad-service-b:
+    build: ./traditional/service-b
+    container_name: trad-service-b
+    ports:
+      - "3002:3002"
+    environment:
+      - SERVICE_NAME=service-b
+      - PORT=3002
+      - SESSION_SECRET=insecure-secret-b
+    networks:
+      - traditional-net
+
+  # Traditional Admin Panel
+  trad-admin-panel:
+    build: ./traditional/admin-panel
+    container_name: trad-admin
+    ports:
+      - "3003:3003"
+    environment:
+      - SERVICE_NAME=admin-panel
+      - PORT=3003
+      - SESSION_SECRET=insecure-secret-admin
+    networks:
+      - traditional-net
+
+  # Traditional API Service
+  trad-api-service:
+    build: ./traditional/api-service
+    container_name: trad-api
+    ports:
+      - "3004:3004"
+    environment:
+      - SERVICE_NAME=api-service
+      - PORT=3004
+      - SESSION_SECRET=insecure-secret-api
+    networks:
+      - traditional-net
+
+# ========================================================
+# NETWORKS
+# ========================================================
+networks:
+  sso-net:
+    driver: bridge
+  traditional-net:
+    driver: bridge

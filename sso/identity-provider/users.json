@@ -1,0 +1,25 @@
+{
+  "users": [
+    {
+      "id": "user_001",
+      "email": "user@test.com",
+      "password": "$2b$10$placeholder",
+      "role": "user",
+      "name": "Test User"
+    },
+    {
+      "id": "admin_001",
+      "email": "admin@test.com",
+      "password": "$2b$10$placeholder",
+      "role": "admin",
+      "name": "Admin User"
+    },
+    {
+      "id": "victim_001",
+      "email": "victim@test.com",
+      "password": "$2b$10$placeholder",
+      "role": "user",
+      "name": "Victim User"
+    }
+  ]
+}

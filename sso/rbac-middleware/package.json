@@ -1,0 +1,6 @@
+{
+  "name": "rbac-middleware",
+  "version": "1.0.0",
+  "description": "Shared RBAC middleware for SSO service providers",
+  "main": "index.js"
+}
