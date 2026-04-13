@@ -1,256 +1,133 @@
-# SSO vs Traditional Authentication — Test Reports
+# SSO vs. Traditional Auth: Detailed Security Test Reports (T1-T11)
 
-> **Project:** Network Security Comparative Analysis
-> **Author:** Samet Bulut (2021510016)
-> **Date:** April 2026
-> **Environment:** Docker Compose (10 microservices), Node.js, RS256 JWT
-> **Tests:** 11 automated security scenarios (T1–T11)
-> **Modes:** SECURE_MODE=false (Insecure) / SECURE_MODE=true (Secure)
+Bu doküman, Tek Oturum Açma (SSO) ve Geleneksel Çoklu Giriş sistemleri arasında yapılan 11 deneysel güvenlik ve performans testinin derinlemesine sonuçlarını, istatistiksel analizlerini ve zafiyet karşılaştırmalarını içermektedir.
 
 ---
 
-## 1. Test Environment Overview
+## T1 — Brute Force Attack (Geleneksel Sistem)
+**Makale Analizi:** Zineddine et al. (CMC 2025)
+**Metodoloji:** 4 bağımsız endpoint'e yönelik sözlük saldırısı (correct pw at position 24), her servis için 5 tekrar (n=5).
 
-### Traditional Architecture (4 Services)
-| Service | Port | Database | Auth Method |
-|---------|------|----------|-------------|
-| Service A | 3001 | Local db.json | Session/Password |
-| Service B | 3002 | Local db.json | Session/Password |
-| Admin Panel | 3003 | Local db.json | Session/Password |
-| API Service | 3004 | Local db.json | Session/Password |
+### Sonuçlar
+| Endpoint | Ortalama Kırılma Süresi | Standart Sapma | Deneme |
+|----------|-----------------------|----------------|--------|
+| Service A | 1,052ms | ±25ms | 24 |
+| Service B | 1,038ms | ±9ms  | 24 |
+| Admin     | 1,052ms | ±13ms | 24 |
+| API       | 1,039ms | ±8ms  | 24 |
 
-### SSO Architecture (6 Services)
-| Service | Port | Role |
-|---------|------|------|
-| Identity Provider (IdP) | 4000 | Central auth, OAuth 2.0 Authorization Code Flow |
-| JWT Service | 4001 | RSA key management, token signing |
-| Service A (SP) | 4002 | Service Provider, RBAC middleware |
-| Service B (SP) | 4003 | Service Provider, RBAC middleware |
-| Admin Panel (SP) | 4004 | Service Provider, RBAC middleware |
-| API Service (SP) | 4005 | Service Provider, RBAC middleware |
-
-### Security Toggle
-- `SECURE_MODE=false`: No PKCE, prefix-based URI matching, `jwt.decode()` (no signature verification), no state/issuer/audience checks
-- `SECURE_MODE=true`: PKCE S256 enforced, exact URI matching, `jwt.verify()` with RS256, strict state/issuer/audience validation, JTI replay detection
+**Akademik Kıyaslama:** Tüm servislerin bağımsız olarak kırılabilmesi, geleneksel mimari sistemin saldırı yüzeyini fiziksel olarak 4 katına çıkardığını göstermektedir. (Vulnerability Confirmed)
 
 ---
 
-## 2. Test Results
+## T2 — Password Reuse Attack (Geleneksel Sistem)
+**Makale Analizi:** Zineddine et al. (CMC 2025)
 
-### T1 — Brute Force Attack (Traditional System)
-**Reference:** Zineddine et al. (CMC 2025)
-**Objective:** Demonstrate that independent login endpoints multiply the attack surface
+**Sonuç:** Çalınan tek bir şifre (`user@test.com:password123`) kullanılarak, entegrasyonu olmayan diğer 3 servise de %100 oranında yetkisiz giriş yapılmıştır. 
 
-**Methodology:**
-- Dictionary of 50 common passwords; correct password at position 24
-- 5 runs per endpoint for statistical reliability
-- 4 independent endpoints tested
-
-**Results (5-run average):**
-
-| Endpoint | Mean Time | Std Dev | Attempts |
-|----------|-----------|---------|----------|
-| Service A (:3001) | 1,052ms | ±25ms | 24 |
-| Service B (:3002) | 1,038ms | ±9ms | 24 |
-| Admin (:3003) | 1,052ms | ±13ms | 24 |
-| API (:3004) | 1,039ms | ±8ms | 24 |
-
-**Finding:** All 4 endpoints compromised in ~1 second each. Low standard deviation (8–25ms) confirms reproducibility. Traditional architecture provides 4 separate attack vectors vs SSO's single IdP.
+**Akademik Kıyaslama:** Modern SSO mimarisi bu "domino taşı" etkisini ortadan kaldırırken, geleneksel sistemde kullanıcıların aynı şifreyi kullanma eğilimi tüm ekosistemi riske atmaktadır. (Vulnerability Confirmed)
 
 ---
 
-### T2 — Password Reuse Attack (Traditional System)
-**Reference:** Zineddine et al. (CMC 2025)
-**Objective:** Demonstrate credential leakage cascade across independent services
+## T3 — Service Isolation / Fault Tolerance (Geleneksel Sistem)
+**Makale Analizi:** Zineddine et al. (CMC 2025)
 
-**Results:**
-- Compromised credential: `user@test.com:password123`
-- Services compromised: **4/4 (100%)**
-- No cross-service anomaly detection exists
+**Sonuç:** Service A kasıtlı olarak çökertildiğinde (`docker stop trad-service-a`), geriye kalan 3 servise başarıyla login olunmaya devam edilmiştir. (%75 erişilebilirlik).
 
-**Finding:** A single leaked password grants access to all services. In SSO, password is stored only at the IdP — a breach at one SP does not expose credentials.
+**Akademik Kıyaslama:** Merkezi bir doğrulama noktası (IdP) olmayan geleneksel mimari, kısmi çöküntülere (partial outages) karşı SSO'dan çok daha dayanıklıdır. (Advantage Confirmed)
 
 ---
 
-### T3 — Service Isolation / Fault Tolerance (Traditional System)
-**Reference:** Zineddine et al. (CMC 2025)
-**Objective:** Demonstrate traditional system resilience to single-service failure
+## T4 — JWT Replay & alg:none Attacks (SSO)
+**Makale Analizi:** Philippaerts et al. (RAID 2022)
 
-**Results:**
-- Service A stopped via `docker stop trad-service-a`
-- Surviving services: **3/3 (75% availability)**
-- Service B, Admin, API continued operating normally
+**Güvensiz Mod:** 
+- JTI (Replay) kontrolü eksikken: Çalınan JWT defalarca kullanıldı (Başarılı)
+- JWT signature check eksikken: Token algoritması `alg:none` olarak değiştirilip sisteme sızıldı (Başarılı)
 
-**Finding:** Traditional architecture's only structural advantage — no central dependency means localized failures remain localized. Directly contrasts with T8's SSO SPOF finding.
+**Güvenli Mod:**
+- Replay: `usedJtis.has()` ile 401 Unauthorized
+- alg:none: `jwt.verify(..., {algorithms: ['RS256']})` ile 401 Unauthorized
 
----
-
-### T4 — JWT Replay & alg:none Attacks (SSO)
-**Reference:** Philippaerts et al. (RAID 2022) — "97% of IdPs miss critical controls"
-
-| Attack Vector | Insecure Mode | Secure Mode |
-|--------------|---------------|-------------|
-| Replay (same token twice) | 🚨 **Successful** — No JTI check | 🔒 **Blocked** — JTI blacklist active |
-| alg:none (unsigned token) | 🚨 **Successful** — `jwt.decode()` trusts payload | 🔒 **Blocked** — `jwt.verify()` rejects non-RS256 |
-
-**Finding:** Both attacks succeed when signature verification is absent. Single configuration change (`decode` → `verify`) eliminates both vectors entirely.
+**Akademik Kıyaslama:** Araştırma verilerinde belirtilen "OAuth 2.0 / JWT uygulamalarındaki konfigurasyon eksikliklerinin %97'ye varan güvenlik ihlallerine yol açtığı" teorisi, Insecure PoC'de %100 sömürüye dönüştürülmüş ve doğru RS256/JTI validasyonuyla mitigate edilmiştir.
 
 ---
 
-### T5 — Redirect URI Manipulation (SSO)
-**Reference:** Innocenti et al. (ACSAC 2023) — "37.5% Path Confusion, 62.5% OPP"
+## T5 — Redirect URI Manipulation (SSO)
+**Makale Analizi:** Innocenti et al. (ACSAC 2023)
 
-| Variant | Manipulated URI | Insecure | Secure |
-|---------|----------------|----------|--------|
-| Path Confusion | `/callback/../evil` | 🚨 Accepted | 🔒 Rejected |
-| OAuth Parameter Pollution | `/callback?redirect_uri=evil.com` | 🚨 Accepted | 🔒 Rejected |
-| Wildcard/Suffix | `/callback.evil.com` | 🚨 Accepted | 🔒 Rejected |
+**Güvensiz Mod (Prefix-based validation `startsWith`):**
+- Path Confusion (`/callback/../evil`): Başarılı
+- OAuth Parameter Pollution (`/callback?redirect_uri=evil.com`): Başarılı
+- Wildcard/Suffix (`/callback.evil.com`): Başarılı
 
-**Insecure:** 3/3 (100%) | **Secure:** 0/3 (0%)
+**Güvenli Mod (Exact-match validation `includes`):** Tüm vektörler engellendi.
 
-**Finding:** `startsWith()` prefix matching is fundamentally broken. Exact string match (`includes()`) eliminates all three categories. Innocenti's prevalence rates (37.5–62.5%) translate to 100% exploit certainty when the vulnerability exists.
-
----
-
-### T6 — CSRF / Session Fixation (SSO)
-**Reference:** Fett et al. (CCS 2016) & Benolli et al. (DIMVA 2021)
-
-**Attack Chain (3 Phases):**
-
-| Phase | Description | Insecure | Secure |
-|-------|-------------|----------|--------|
-| Phase 1 | Attacker obtains auth code with own credentials | ✅ Code obtained | ✅ Code obtained (state required) |
-| Phase 2 | Attacker's code submitted on victim's behalf | 🚨 **Token issued!** Session Fixation | 🔒 `invalid_grant` — PKCE mismatch |
-| Phase 3 | Login without state parameter | 🚨 **Accepted** | 🔒 `400 Bad Request` |
-
-**Finding:** Without PKCE binding, an attacker can inject their authorization code into a victim's session. PKCE's code_verifier/code_challenge mechanism makes cross-user code injection cryptographically impossible.
+**Akademik Kıyaslama:** Yüzde 37 ila 62 aralığında tehlike doğuran zayıf URI validasyonları, Exact-Match algoritmayla bütünüyle bertaraf edilmiştir.
 
 ---
 
-### T7 — Identity-Account Mismatch (SSO)
-**Reference:** Liu et al. (WWW 2021)
+## T6 — CSRF / Session Fixation (SSO)
+**Makale Analizi:** Fett et al. (CCS 2016)
 
-**Attack Setup:**
-- Attacker generates their **own RSA 2048-bit key pair** (separate from system's keys)
-- Signs JWT with: `iss: "http://evil-idp.com"`, `sub: "attacker_001"`, `email: "victim@test.com"`
-- Both issuer AND cryptographic signature are foreign
+**Güvensiz Mod:** Saldırgan kendi authorization code'unu, `state` kontrolünden habersiz kurbanın oturum fiksasyonuna (Session Fixation) yamadı. Kurbanın giriş bilgileri saldırganın hesabına tahsis edildi. (Başarılı)
 
-| Mode | Result | Reason |
-|------|--------|--------|
-| Insecure | 🚨 **Account Takeover!** | `jwt.decode()` skips signature verification, trusts email claim |
-| Secure | 🔒 **Blocked** | `jwt.verify()` rejects foreign signature before checking any claims |
-
-**Finding:** Email-only identity linking without signature verification enables complete account takeover. Cryptographic signature verification is the first and strongest line of defense.
+**Güvenli Mod:** State ve PKCE (`code_verifier`) kontrolleri, kurbanın foreign authorization code'u işletmesini 400 Bad Request hatasıyla engelledi. (Mitigate edildi)
 
 ---
 
-### T8 — Single Point of Failure / SPOF (SSO)
-**Reference:** Zineddine et al. (CMC 2025)
+## T7 — Identity-Account Mismatch (SSO)
+**Makale Analizi:** Liu et al. (WWW 2021)
 
-**4-Phase Test:**
+**Metodoloji:** Saldırgan kendi oluşturduğu, kurbanın (`victim@test.com`) emailini taşıyan fakat tamamen farklı bir yabancı RSA Private Key ile imzalanmış (`iss: evil-idp.com`) bir JWT üretti.
 
-| Phase | Action | Result |
-|-------|--------|--------|
-| 1 | Acquire JWT while IdP is healthy | ✅ Token obtained |
-| 2 | Kill IdP (`docker stop sso-idp`) | IdP DOWN |
-| 3 | Attempt **new logins** to 4 services | ❌ **0/4 — SPOF confirmed** |
-| 4 | Access services with **existing token** | ✅ **4/4 — Stateless JWT works!** |
-
-**Critical Nuance:** SSO SPOF is not an instant total blackout. JWT tokens are stateless — they are verified locally using the cached public key. IdP outage blocks **new authentication** but does not invalidate **existing sessions** until token expiry (1 hour in our setup).
-
-> *"The SSO SPOF risk manifests as gradual degradation rather than immediate total failure. New users cannot authenticate (0/4), but existing sessions remain functional (4/4) until token expiry."*
+**Güvensiz Mod:** Service A token içerisindeki `email` adresine güvenerek Account Takeover'a izin verdi.
+**Güvenli Mod:** Yabancı imza, `token_verification_failed` hatası verip isteği anında düşürdü.
 
 ---
 
-### T9 — Token Expiration Enforcement (SSO) — Independent Research
-**Related:** Philippaerts et al. (RAID 2022) — Token Lifecycle
+## T8 — Single Point of Failure Nüansı (SSO)
+**Makale Analizi:** Zineddine et al. (CMC 2025)
 
-| Test | Description | Insecure | Secure |
-|------|-------------|----------|--------|
-| A | Expired token (exp = 1 hour ago) | 🔒 Rejected (`token_expired`) | 🔒 Rejected |
-| B | Manipulated exp (attacker key, exp = year 2030) | 🚨 **Accepted!** | 🔒 Rejected (`token_verification_failed`) |
+**Test Senaryosu:** SSO Identity Provider sunucusu öldürülmüştür.
 
-**Finding:** The RBAC middleware correctly checks `exp` in both modes (Test A always rejected). However, Test B reveals a subtle vulnerability: in insecure mode, since `jwt.decode()` doesn't verify signatures, an attacker can forge a token with any `exp` value using their own key pair and it will be trusted.
+- **Yeni Oturum Denemesi:** 4 servise de giriş başarısız (**0/4 New Login**)
+- **Mevcut JWT ile Deneme:** Servis sağlayıcılar kendi belleklerindeki Public Key ile JWT imzasını doğrulayabildiği için 4 serviste de oturumlar açık kaldı (**4/4 Existing Token Survives**).
 
-**Difference from T4:** T4 tests **replay** (reusing a valid token). T9 tests **expiry manipulation** (forging a token with extended lifetime). They are complementary attack vectors on token lifecycle.
+**Akademik Kıyaslama:** SPOF'un SSO ekosistemini anında karartmadığı, önceden elde edilen JWT tokenların ömrü (exp) dolana dek sistemlerin işlevsellik göstermeye devam ettiği (Stateless) saptanmıştır.
 
 ---
 
-### T10 — DoS Bottleneck: Centralization Stress Test — Independent Research
-**Related:** Zineddine et al. (CMC 2025) — Centralization Risk
+## T9 — Token Expiration Enforcement (SSO)
+**Makale Analizi:** Philippaerts et al. (RAID 2022)
 
-**Setup:** 100 concurrent authentication requests
+- **Test A (Gerçek Süresi Dolmuş Token):** Her iki modda da RBAC tarafından engellendi.
+- **Test B (İmzası Değiştirilmiş Exp_2030 Token):** Güvensiz modda (Sadece decodes) saldırganın kendi foreign key'iyle exp süresini sonsuza uzattığı token **kabul görmüştür.**
 
-| Metric | Traditional (4 Servers) | SSO (Single IdP) | Ratio |
-|--------|------------------------|-------------------|-------|
-| **Mean** | 376ms | 643ms | **1.71x** |
-| **p50** (Median) | 387ms | 643ms | 1.66x |
-| **p95** | 636ms | 1,145ms | **1.80x** |
-| **p99** | 677ms | 1,191ms | 1.76x |
-| **Max** | 677ms | 1,191ms | 1.76x |
-| Success Rate | 100/100 | 100/100 | Equal |
-
-**Finding:** The SSO IdP, as a single centralized authentication endpoint, processes requests 1.71x slower on average than the distributed traditional system under identical load. The tail latency (p95) degradation is even worse at 1.80x, indicating that SSO centralization creates a measurable performance bottleneck that compounds under high concurrency.
+**Akademik Kıyaslama:** JWT token iptal mekanizmasındaki sorunlar ve süresiz yaşama zafiyetleri (Expiration Manipulation), imza mekanizması atlatıldığında kaçınılmazdır.
 
 ---
 
-### T11 — RBAC Role Escalation — Independent Research
+## T10 — DoS Bottleneck: Centralization Stress (SSO vs Trad)
+**Makale Analizi:** Zineddine et al. (CMC 2025)
 
-| Test | Description | Insecure | Secure |
-|------|-------------|----------|--------|
-| A | User-role token → `/admin` | 🔒 403 Forbidden | 🔒 403 Forbidden |
-| B | Forged admin-role token → `/admin` | 🚨 **200 OK — Escalated!** | 🚨 **200 OK — Escalated!** |
+**Senaryo:** Eşzamanlı 100 concurrent Login isteği
 
-**⚠️ Critical Finding: Vulnerability in BOTH Modes!**
+| Metrik (ms) | Geleneksel (Dağıtık) | SSO (Merkezileşmiş | Fark |
+|------------|----------|----------|--------|
+| Ort. Yanıt (Mean) | 376ms | 643ms | **1.71x Yavaş** |
+| p50 (Median) | 387ms | 643ms | 1.66x |
+| p95 (Kuyruk) | 636ms | 1,145ms | **1.80x Yavaş** |
+| p99 (Kuyruk) | 677ms | 1,191ms | 1.76x |
 
-The JWT Service (`/sign` endpoint) allows any caller to request a token with any `role` claim. Since the token is signed with the legitimate system key, Service A's RBAC middleware trusts the `role: "admin"` claim and grants access.
-
-**Root Cause:** Role claims stored inside JWT tokens are self-asserted. If the token-issuing endpoint does not enforce role assignment from a trusted user database, privilege escalation is trivial.
-
-**Recommended Fix:** The `/sign` endpoint should look up the user's actual role from the database rather than accepting it from the request body.
-
----
-
-## 3. Comparative Analysis — Literature vs. Experimental Results
-
-| Domain | Literature Finding | Lit. Metric | Our PoC (Insecure) | Our PoC (Secure) | Alignment |
-|--------|-------------------|-------------|--------------------|-----------------|----|
-| Attack Surface | Zineddine: Multi-login multiplies vectors | Theoretical (4x) | **4/4 endpoints cracked (100%)** avg 1045±15ms, n=5 | N/A | ✅ Confirmed |
-| Password Reuse | Zineddine: Credential cascade risk | Expected | **4/4 services compromised (100%)** | N/A | ✅ Confirmed |
-| Fault Tolerance | Zineddine: No central dependency | Expected | **3/4 alive (75%)** after single crash | N/A | ✅ Confirmed |
-| JWT Replay | Philippaerts: 97% IdPs miss controls | 97% prevalence | **2/2 attacks successful (100%)** | **0/2 (0%)** | ✅ Confirmed |
-| Redirect URI | Innocenti: 37.5% PathConf, 62.5% OPP | Prevalence rates | **3/3 exploits (100%)** | **0/3 (0%)** | ✅ Confirmed |
-| CSRF/State | Fett/Benolli: Session Fixation risk | Formal proof | **Session Fixation achieved** | **PKCE blocked** | ✅ Confirmed |
-| Identity Mismatch | Liu: Email-only linking → takeover | Case study | **Account Takeover (foreign key!)** | **Signature rejected** | ✅ Confirmed |
-| SSO SPOF | Zineddine: IdP = single failure point | Theoretical | **New: 0/4, Existing: 4/4** | — | ✅ Confirmed (with nuance) |
-| Token Lifecycle | Philippaerts: Lifecycle controls weak | 97% prevalence | **Expired: blocked, Manipulated: accepted** | **Both blocked** | ✅ Partial vuln |
-| Centralization Load | Zineddine: SSO = bottleneck | Theoretical | **SSO 1.71x slower (p95: 1.80x)** | — | ✅ Confirmed |
-| Role Escalation | Independent | — | **Forged admin: accepted** | **Forged admin: accepted** | ⚠️ Both modes vulnerable |
+**Akademik Kıyaslama:** Tüm trafiğin IdP üzerinde merkezileşmesi, yoğun yük altında Geleneksel sisteme kıyasla 1.80 kat (p95) darboğaz yaratmıştır. Centralization riski (Bottleneck) ampirik olarak kanıtlanmıştır.
 
 ---
 
-## 4. Key Observations
+## T11 — RBAC Role Escalation (SSO)
+**Bağımsız Test (Privilege Escalation)**
 
-### What SSO Gets Right (vs Traditional)
-1. **Single credential store** — password reuse cascade eliminated
-2. **Centralized security controls** — one fix protects all services
-3. **Cryptographic token verification** — when properly configured, eliminates replay, alg:none, identity mismatch, and URI manipulation
+- User rolüyle `/admin` endpointine gidiş: `403 Forbidden` (RBAC engelledi)
+- Saldırganın sahte "admin" rolü set ederek token istemesi (`iss: localhost:4000`, `role: admin`): **Her iki modda da Güvenlik İhlali (200 OK — Admin Access Granted)**
 
-### What SSO Gets Wrong (Structural Risks)
-1. **SPOF** — IdP failure blocks all new authentications (but existing sessions survive)
-2. **Bottleneck** — Single IdP is 1.71x slower under concurrent load
-3. **Self-asserted claims** — Role escalation possible if token endpoint lacks role validation
-
-### The Security Toggle Insight
-The `SECURE_MODE` flag demonstrates that **SSO security is not inherent** — it depends entirely on implementation quality. An improperly configured SSO system (no PKCE, no signature verification, prefix URI matching) is **more dangerous** than traditional multi-login because it centralizes all risk into a single exploitable point.
-
----
-
-## 5. Limitations
-
-1. **Isolated Docker network** — localhost latency (~0ms) does not reflect real-world network conditions (CDN, firewalls, packet loss)
-2. **Deterministic dictionary** — Correct password position (24th) is fixed, not randomized across runs
-3. **No real database** — JSON files used instead of SQL/NoSQL; injection attacks not modeled
-4. **No MFA** — Multi-factor authentication not implemented; its impact on security profile not measured
-5. **Single-machine deployment** — All 10 containers share CPU/memory resources, which may affect T10 DoS results
-6. **Token expiry fixed at 1 hour** — Trade-off between UX and replay window not explored parametrically
+**Nihai Yorum:** Token üretim anında Role claim'lerinin "Self-asserted" (kullanıcının kendi beyanına bırakılmış) olması, JWT tabanlı sistemlerdeki en tehlikeli mantık hatalarından biridir ve sistem imzaları kontrol etse de yetki yükselmesini doğrudan engelleyemez.
